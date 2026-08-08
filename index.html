@@ -608,143 +608,145 @@
   </footer>
 </div>
 
-<!-- Google APIs -->
-<script src="https://apis.google.com/js/api.js"></script>
+<!-- Google Identity Services (modern OAuth2 token client — gapi.auth2 is deprecated/removed) -->
 <script src="https://accounts.google.com/gsi/client"></script>
 
 <script>
 // Google Drive configuration
 var GOOGLE_CLIENT_ID='683218012082-7j5ot9u88r44jsu05g9sgjnfilvrruov.apps.googleusercontent.com';
-var googleAuth=null;
+var DRIVE_SCOPE='https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file';
+var tokenClient=null;
+var accessToken=null;
 var driveFileId=null;
 var isGoogleDriveSync=false;
 
-// Initialize Google API
 function initGoogleApi(){
-  google.accounts.id.initialize({
-    client_id:GOOGLE_CLIENT_ID,
-    callback:handleCredentialResponse
-  });
-}
-
-function handleCredentialResponse(response){
-  // response.credential contains the JWT
-  if(response.credential){
-    // Exchange credential for access token via gapi
-    gapi.load('client:auth2',function(){
-      gapi.auth2.init({client_id:GOOGLE_CLIENT_ID}).then(function(){
-        var auth=gapi.auth2.getAuthInstance();
-        auth.signIn().then(function(){
-          googleAuth=auth;
-          isGoogleDriveSync=true;
-          updateAuthUI();
-          loadFromGoogleDrive(); // Load data after successful login
-        });
-      });
-    });
+  if(!window.google||!google.accounts||!google.accounts.oauth2){
+    // GIS script not ready yet — retry shortly
+    setTimeout(initGoogleApi,300);
+    return;
   }
-}
-
-function loginWithGoogle(){
-  gapi.load('client:auth2',function(){
-    gapi.auth2.init({client_id:GOOGLE_CLIENT_ID}).then(function(){
-      var auth=gapi.auth2.getAuthInstance();
-      auth.signIn().then(function(){
-        googleAuth=auth;
+  tokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:GOOGLE_CLIENT_ID,
+    scope:DRIVE_SCOPE,
+    callback:function(tokenResponse){
+      if(tokenResponse&&tokenResponse.access_token){
+        accessToken=tokenResponse.access_token;
         isGoogleDriveSync=true;
         updateAuthUI();
+        fetchUserInfo();
         loadFromGoogleDrive();
-      }).catch(function(err){
-        console.error('Sign in error:',err);
-        alert('Error al iniciar sesión. Verifica que hayas dado permisos.');
-      });
-    });
-  });
-}
-
-function logoutGoogle(){
-  if(googleAuth){
-    googleAuth.signOut().then(function(){
-      googleAuth=null;
+      }
+    },
+    error_callback:function(err){
+      console.error('Google auth error:',err);
       isGoogleDriveSync=false;
-      driveFileId=null;
       updateAuthUI();
-    });
-  }
-}
-
-function updateAuthUI(){
-  var loginBtn=$('googleLoginBtn'), userInfo=$('userInfo'), userEmail=$('userEmail');
-  if(googleAuth && googleAuth.isSignedIn.get()){
-    loginBtn.style.display='none';
-    userInfo.style.display='block';
-    var profile=googleAuth.currentUser.get().getBasicProfile();
-    userEmail.textContent=profile.getEmail();
-    isGoogleDriveSync=true;
-  }else{
-    loginBtn.style.display='block';
-    userInfo.style.display='none';
-    isGoogleDriveSync=false;
-  }
-}
-
-function saveToGoogleDrive(data){
-  if(!isGoogleDriveSync||!googleAuth||!googleAuth.isSignedIn.get()) return;
-  
-  var accessToken=googleAuth.currentUser.get().getAuthResponse().id_token;
-  var payload=JSON.stringify(data);
-  
-  gapi.client.load('drive','v3',function(){
-    if(!driveFileId){
-      // Create new file
-      var fileMetadata={name:'calculadora-datos.json',mimeType:'application/json',parents:['appDataFolder']};
-      var media={mimeType:'application/json',body:payload};
-      gapi.client.drive.files.create({resource:fileMetadata,media:media,fields:'id'}).then(function(response){
-        driveFileId=response.result.id;
-        console.log('File created:',driveFileId);
-      });
-    }else{
-      // Update existing file
-      var media={mimeType:'application/json',body:payload};
-      gapi.client.drive.files.update({fileId:driveFileId,media:media}).then(function(){
-        console.log('File updated');
-      });
+      if(err&&err.type==='popup_closed') return; // user just closed the popup, no need to alert
+      alert('No se pudo iniciar sesión con Google. Si ves una pantalla de "app no verificada", toca "Avanzado" y luego "Ir a la app (no seguro)" — es normal mientras la app está en modo de prueba.');
     }
   });
 }
 
+function loginWithGoogle(){
+  if(!tokenClient){
+    alert('Google todavía está cargando, intenta de nuevo en unos segundos.');
+    initGoogleApi();
+    return;
+  }
+  tokenClient.requestAccessToken({prompt:'consent'});
+}
+
+function logoutGoogle(){
+  if(accessToken){
+    google.accounts.oauth2.revoke(accessToken,function(){});
+  }
+  accessToken=null;
+  isGoogleDriveSync=false;
+  driveFileId=null;
+  updateAuthUI();
+}
+
+function updateAuthUI(){
+  var loginBtn=$('googleLoginBtn'), userInfo=$('userInfo'), userEmail=$('userEmail');
+  if(accessToken){
+    loginBtn.style.display='none';
+    userInfo.style.display='block';
+  }else{
+    loginBtn.style.display='block';
+    userInfo.style.display='none';
+    userEmail.textContent='';
+  }
+}
+
+function fetchUserInfo(){
+  fetch('https://www.googleapis.com/oauth2/v3/userinfo',{
+    headers:{'Authorization':'Bearer '+accessToken}
+  }).then(function(r){ return r.json(); }).then(function(data){
+    $('userEmail').textContent=data.email||'Conectado';
+  }).catch(function(){ $('userEmail').textContent='Conectado'; });
+}
+
+function driveApiFetch(url,options){
+  options=options||{};
+  options.headers=options.headers||{};
+  options.headers['Authorization']='Bearer '+accessToken;
+  return fetch(url,options);
+}
+
+function saveToGoogleDrive(data){
+  if(!isGoogleDriveSync||!accessToken) return;
+  var payload=JSON.stringify(data);
+  if(!driveFileId){
+    var boundary='calc_boundary_'+Date.now();
+    var metadata={name:'calculadora-datos.json',mimeType:'application/json',parents:['appDataFolder']};
+    var body=
+      '--'+boundary+'\r\n'+
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n'+
+      JSON.stringify(metadata)+'\r\n'+
+      '--'+boundary+'\r\n'+
+      'Content-Type: application/json\r\n\r\n'+
+      payload+'\r\n'+
+      '--'+boundary+'--';
+    driveApiFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{
+      method:'POST',
+      headers:{'Content-Type':'multipart/related; boundary='+boundary},
+      body:body
+    }).then(function(r){ return r.json(); }).then(function(result){
+      if(result&&result.id) driveFileId=result.id;
+    }).catch(function(e){ console.error('Drive save error:',e); });
+  }else{
+    driveApiFetch('https://www.googleapis.com/upload/drive/v3/files/'+driveFileId+'?uploadType=media',{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body:payload
+    }).catch(function(e){ console.error('Drive update error:',e); });
+  }
+}
+
 function loadFromGoogleDrive(){
-  if(!isGoogleDriveSync||!googleAuth||!googleAuth.isSignedIn.get()) return;
-  
-  gapi.client.load('drive','v3',function(){
-    gapi.client.drive.files.list({
-      spaces:'appDataFolder',
-      fields:'files(id,name)',
-      pageSize:1,
-      q:"name='calculadora-datos.json'"
-    }).then(function(response){
-      var files=response.result.files;
+  if(!isGoogleDriveSync||!accessToken) return;
+  var q=encodeURIComponent("name='calculadora-datos.json'");
+  driveApiFetch('https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,name)&q='+q)
+    .then(function(r){ return r.json(); })
+    .then(function(result){
+      var files=result.files;
       if(files&&files.length>0){
         driveFileId=files[0].id;
-        gapi.client.drive.files.get({fileId:driveFileId,alt:'media'}).then(function(response){
-          try{
-            var data=response.result;
-            if(data.boxData) boxData=data.boxData;
-            if(data.loansHistory) loansHistory=data.loansHistory;
-            // Re-render UI with loaded data
-            renderBoxGrid();
-            renderHist();
-            console.log('Data loaded from Drive');
-          }catch(e){
-            console.error('Error parsing Drive data:',e);
-          }
-        });
-      }else{
-        // No file exists, create one with current data
-        saveToGoogleDrive({boxData:boxData,loansHistory:loansHistory});
+        return driveApiFetch('https://www.googleapis.com/drive/v3/files/'+driveFileId+'?alt=media').then(function(r){ return r.json(); });
       }
-    });
-  });
+      saveToGoogleDrive({boxData:boxData,loansHistory:loansHistory});
+      return null;
+    })
+    .then(function(data){
+      if(data){
+        if(data.boxData) boxData=data.boxData;
+        if(data.loansHistory) loansHistory=data.loansHistory;
+        renderBoxGrid();
+        renderHist();
+      }
+    })
+    .catch(function(e){ console.error('Drive load error:',e); });
 }
 
 (function(){
@@ -1620,21 +1622,9 @@ function loadFromGoogleDrive(){
   try{ savedTab=localStorage.getItem(TABKEY)||"prestamo"; }catch(e){}
   setActiveTab(savedTab);
 
-  // Initialize Google API
+  // Initialize Google Identity Services (modern token client)
   initGoogleApi();
-  // Check if user is already signed in
-  if(window.gapi&&gapi.auth2){
-    gapi.auth2.getAuthInstance().then(function(auth){
-      if(auth&&auth.isSignedIn.get()){
-        googleAuth=auth;
-        isGoogleDriveSync=true;
-        updateAuthUI();
-        loadFromGoogleDrive();
-      }else{
-        updateAuthUI();
-      }
-    });
-  }
+  updateAuthUI(); // starts logged out — GIS token client doesn't restore sessions across reloads, so the user re-clicks "Iniciar sesión" each visit
 })();
 </script>
 </body>
