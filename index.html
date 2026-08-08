@@ -86,15 +86,18 @@
   .cmp-diff .delta-dn{color:var(--accent-dark)}
   .cmp-diff .cmp-eq{color:var(--faint);font-weight:500}
 
-  /* Mini-box grid */
-  .pbox-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
-  .pbox{border:1px solid var(--line-soft);border-radius:14px;padding:14px;background:var(--surface);box-shadow:var(--shadow)}
-  .pbox-head{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  /* Mini-box list: full-width rows stacked vertically (not a card grid) */
+  .pbox-grid{display:flex;flex-direction:column;gap:14px}
+  .pbox{
+    border:1px solid var(--line-soft);border-radius:14px;padding:16px 18px;background:var(--surface);box-shadow:var(--shadow);
+    display:grid;grid-template-columns:1fr 1fr;gap:0 22px;
+  }
+  .pbox-head{grid-column:1/-1;display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
   .pbox-head .pbox-cat{flex:0 0 auto;min-width:150px}
   .pbox-head .pbox-title{flex:1;min-width:110px;font-weight:700}
   .pbox-head .rem-del{margin-left:auto;flex:0 0 auto}
-  .pbox-line{border-top:1px solid var(--line-soft);padding-top:11px;margin-top:11px}
-  .pbox-line:first-of-type{border-top:0;margin-top:0}
+  .pbox-line{padding:0 0 0 22px;border-left:1px solid var(--line-soft)}
+  .pbox-line[data-line="a"]{padding-left:0;border-left:0}
   .pbox-line-head{display:flex;align-items:center;gap:8px;margin-bottom:7px}
   .pbox-badge{
     width:20px;height:20px;border-radius:50%;background:var(--accent-soft);color:var(--accent-dark);
@@ -109,9 +112,14 @@
   .pbox-line-row .input-money input{padding:9px 10px 9px 27px}
   .pbox-subtotal{margin-top:8px;font-weight:700;font-size:13.5px;text-align:right;font-variant-numeric:tabular-nums;transition:background .15s}
   .pbox-subtotal.pbox-cheaper{color:var(--accent-dark)}
-  .pbox-compare{margin-top:11px;padding-top:11px;border-top:1px dashed var(--line);text-align:center;font-size:12px;font-weight:600;color:var(--faint)}
+  .pbox-compare{grid-column:1/-1;margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);text-align:center;font-size:12px;font-weight:600;color:var(--faint)}
   .pbox-compare .delta-dn{color:var(--accent-dark)}
   .pbox-compare .cmp-eq{color:var(--faint)}
+  @media (max-width:680px){
+    .pbox{grid-template-columns:1fr}
+    .pbox-line{padding-left:0;border-left:0;border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px}
+    .pbox-line[data-line="a"]{border-top:0;padding-top:0;margin-top:0}
+  }
 
   /* Layout */
   .grid{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:16px;align-items:start}
@@ -351,7 +359,7 @@
         <label for="precio">Precio del bien</label>
         <div class="input-money">
           <span class="sym">B/.</span>
-          <input type="text" id="precio" inputmode="decimal" autocomplete="off" value="280,000.00">
+          <input type="text" id="precio" inputmode="decimal" autocomplete="off" value="0.00">
         </div>
       </div>
 
@@ -612,6 +620,9 @@
 <script src="https://accounts.google.com/gsi/client"></script>
 
 <script>
+// Utility function — available globally for all scripts
+var $=function(id){return document.getElementById(id)};
+
 // Google Drive configuration
 var GOOGLE_CLIENT_ID='683218012082-7j5ot9u88r44jsu05g9sgjnfilvrruov.apps.googleusercontent.com';
 var DRIVE_SCOPE='https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file';
@@ -754,7 +765,6 @@ function loadFromGoogleDrive(){
   var HKEY="prestamo_hist_v1", MAX=5;
   var rateMode="nominal";
   var loansHistory=[];
-  var $=function(id){return document.getElementById(id)};
 
   // ---------- number helpers (US format) ----------
   var fmt2=new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
